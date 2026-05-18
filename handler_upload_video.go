@@ -74,13 +74,40 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		respondWithError(w, http.StatusInternalServerError, "error copying file on server", err)
 		return
 	}
-	key := getAssetPath(mediaType)
 
-	tempVideo.Seek(0, io.SeekStart)
+	processedFilePath, err := processVideoForFastStart(tempVideo.Name())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "error processing video", err)
+		return
+	}
+	defer os.Remove(processedFilePath)
+	processedFile, err := os.Open(processedFilePath)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "error opening processed video", err)
+		return
+	}
+
+	aspect, err := getVideoAspectRation(processedFilePath)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "error getting aspect ration from file", err)
+		return
+	}
+	var prefix string
+	switch aspect {
+	case "16:9":
+		prefix = "landscape"
+	case "9:16":
+		prefix = "portrait"
+	default:
+		prefix = "other"
+	}
+
+	key := prefix + "/" + getAssetPath(mediaType)
+
 	_, err = cfg.s3Client.PutObject(context.Background(), &s3.PutObjectInput{
 		Bucket:      aws.String(cfg.s3Bucket),
 		Key:         aws.String(key),
-		Body:        tempVideo,
+		Body:        processedFile,
 		ContentType: aws.String(mediaType),
 	})
 	if err != nil {
